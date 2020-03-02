@@ -1,0 +1,23 @@
+restarts              : 24574
+conflicts             : 16427443       (5151 /sec)
+decisions             : 124138384      (0.00 % random) (38924 /sec)
+propagations          : 12821009781    (4020095 /sec)
+conflict literals     : 529261224      (6.85 % deleted)
+Memory used           : 354.00 MB
+CPU time              : 3189.23 s
+
+estarts              : 19453
+conflicts             : 13105559       (5465 /sec)
+decisions             : 97652941       (0.00 % random) (40719 /sec)
+propagations          : 10084432312    (4205012 /sec)
+conflict literals     : 423846993      (7.45 % deleted)
+Memory used           : 362.00 MB
+CPU time              : 2398.19 s
+
+restarts              : 12286
+conflicts             : 7627756        (4624 /sec)
+decisions             : 57137843       (0.00 % random) (34636 /sec)
+propagations          : 6190318247     (3752447 /sec)
+conflict literals     : 248920622      (7.52 % deleted)
+Memory used           : 255.00 MB
+CPU time              : 1649.67 s

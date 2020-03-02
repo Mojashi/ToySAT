@@ -22,6 +22,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #define Minisat_Dimacs_h
 
 #include <stdio.h>
+#include <fstream>
 
 #include "utils/ParseUtils.h"
 #include "core/SolverTypes.h"
@@ -44,6 +45,62 @@ static void readClause(B& in, Solver& S, vec<Lit>& lits) {
     }
 }
 
+#include <string>
+template<class Solver>
+static void parse_supple_Info(std::string str, Solver& S) {
+    std::ifstream ifs(str);
+    int n, m;
+
+    ifs >> n >> m;
+    S.variables.growTo(n);
+    S.structures.growTo(n);
+    for(int i = 0; n > i; i++)
+        S.variables[i].baseNumber = i;
+
+    for(int i = 0; m > i; i++){
+        int from, to;
+        ifs >> from >> to;
+        S.variables[from].addChild(&S.variables[to]);
+        S.variables[to].setParent(&S.variables[from]);
+    }
+
+    int stcount = 0;
+    ifs >> m;
+    for(int i = 0; m > i; i++){
+        int l;
+        ifs >> l;
+        for(int j = 0; l > j; j++){
+            int a;
+            ifs >> a;
+            S.structures[stcount].addVar(&S.variables[a]);
+            S.variables[a].setStruct(&S.structures[stcount]);
+        }
+        stcount++;
+    }
+    S.structures.shrink(stcount);
+    prepareLCA(&S.variables[0]);
+
+    ifs >> m;
+    S.clauseProp.growTo(m);
+    for(int i = 0; m > i; i++){
+        int a;
+        ifs >> a;
+        assert(0 <= a && a < n);
+        S.clauseProp[i] = a;
+    }
+
+    int nLit;
+    ifs >> nLit >> m;
+    S.litToVar.growTo(nLit);
+    S.varToLit.growTo(n);
+    for(int i = 0; m > i; i++){
+        int a,b;
+        ifs >> a >> b; // lit var
+        S.litToVar[a - 1] = b;
+        S.varToLit[b] = a - 1;
+    }
+}
+
 template<class B, class Solver>
 static void parse_DIMACS_main(B& in, Solver& S) {
     vec<Lit> lits;
@@ -61,14 +118,20 @@ static void parse_DIMACS_main(B& in, Solver& S) {
                 // if (clauses > 4000000)
                 //     S.eliminate(true);
             }else{
-                printf("PARSE ERROR! Unexpected char: %c\n", *in), exit(3);
+                printf("PARSE ERROR! Unexpected char: %c\n", *in);
+                exit(3);
             }
         } else if (*in == 'c' || *in == 'p')
             skipLine(in);
         else{
             cnt++;
             readClause(in, S, lits);
-            S.addClause_(lits); }
+            int bef = S.nClauses();
+            S.addClause_(lits); 
+            if(bef != S.nClauses()){
+                S.getLastClause().setVariable(&S.variables[S.clauseProp[cnt-1]]);
+            }
+        }
     }
     if (vars != S.nVars())
         fprintf(stderr, "WARNING! DIMACS header mismatch: wrong number of variables.\n");
@@ -81,7 +144,9 @@ static void parse_DIMACS_main(B& in, Solver& S) {
 template<class Solver>
 static void parse_DIMACS(gzFile input_stream, Solver& S) {
     StreamBuffer in(input_stream);
-    parse_DIMACS_main(in, S); }
+    parse_supple_Info("./core/supInfo.txt", S);
+    parse_DIMACS_main(in, S); 
+}
 
 //=================================================================================================
 }

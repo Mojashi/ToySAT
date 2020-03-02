@@ -33,8 +33,53 @@ namespace Minisat {
 //=================================================================================================
 // Solver -- the main class:
 
+void prepareLCA(VarTree* root);
+VarTree* LCA(VarTree* a, VarTree* b);
 class Solver {
 public:
+    int sharedNum = 0;
+    vec<VarTree> variables;
+    vec<Structure> structures;
+    vec<int> clauseProp;
+    vec<int> varToLit;
+    vec<int> litToVar;
+
+    inline int getVarNum(Lit lt){
+        assert(litToVar.size() > var(lt));
+        if(litToVar[var(lt)] != 0)
+            return litToVar[var(lt)];
+        return -1;
+    }
+    vector<CRef> distribute(VarTree* base, vec<Lit>& clause, ClauseAllocator& ca){
+        vector<CRef> cls;
+
+        for(int i = 0; clause.size() > i; i++){
+            if(var(clause[i]) != 1 && getVarNum(clause[i]) == -1) return {};
+        }
+
+        for(auto v : base->stc->vars){
+            if(v == base) continue;
+            vec<Lit> cl(clause.size());
+            for(int i = 0; clause.size() > i; i++){
+                bool sgn = sign(clause[i]);
+                int x;
+                if(var(clause[i]) != 1){
+                    int vNum  = getVarNum(clause[i]);
+                    x = varToLit[vNum - base->baseNumber + v->baseNumber];
+                    assert(litToVar[x] == vNum - base->baseNumber + v->baseNumber);
+                }
+                else x = 1;
+                cl[i] = mkLit(x, sgn);
+            }
+            CRef cr = ca.alloc(cl, true);
+            ca[cr].setVariable(v);
+            cls.push_back(cr);
+        }
+        sharedNum += cls.size();
+        return cls;
+    }
+
+    Clause& getLastClause(){return ca[clauses.last()];}
 
     // Constructor/Destructor:
     //
@@ -219,7 +264,7 @@ protected:
     bool     enqueue          (Lit p, CRef from = CRef_Undef);                         // Test if fact 'p' contradicts current state, enqueue otherwise.
     CRef     propagate        ();                                                      // Perform unit propagation. Returns possibly conflicting clause.
     void     cancelUntil      (int level);                                             // Backtrack until a certain level.
-    void     analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel);    // (bt = backtrack)
+    VarTree* analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel);    // (bt = backtrack)
     void     analyzeFinal     (Lit p, vec<Lit>& out_conflict);                         // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
     bool     litRedundant     (Lit p, uint32_t abstract_levels);                       // (helper method for 'analyze()')
     lbool    search           (int nof_conflicts);                                     // Search for a given number of conflicts.

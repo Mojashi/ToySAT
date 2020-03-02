@@ -22,6 +22,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include "mtl/Sort.h"
 #include "core/Solver.h"
+#include "core/SolverTypes.h"
 
 using namespace Minisat;
 
@@ -43,6 +44,41 @@ static IntOption     opt_restart_first     (_cat, "rfirst",      "The base resta
 static DoubleOption  opt_restart_inc       (_cat, "rinc",        "Restart interval increase factor", 2, DoubleRange(1, false, HUGE_VAL, false));
 static DoubleOption  opt_garbage_frac      (_cat, "gc-frac",     "The fraction of wasted memory allowed before a garbage collection is triggered",  0.20, DoubleRange(0, false, HUGE_VAL, false));
 
+
+namespace Minisat {
+
+void prepareLCA(VarTree* root){
+    if(root->ancestor[0])
+        root->depth = root->ancestor[0]->depth + 1;
+    for(int i = 1; VarTree::MaxAncestorLevel > i; i++){
+        if(!root->ancestor[i-1]) break;
+        root->ancestor[i] = root->ancestor[i-1]->ancestor[i-1];
+    }
+    for(auto ch : root->childs){
+        prepareLCA((VarTree*)ch);
+    }
+}
+
+VarTree* LCA(VarTree* a, VarTree* b){
+    if(!b) return a;
+    if(a->depth > b->depth) {
+        (uintptr_t&)a ^= (uintptr_t)b;
+        (uintptr_t&)b = (uintptr_t)a^(uintptr_t)b;
+        (uintptr_t&)a ^= (uintptr_t)b;
+    }
+    for(int len = VarTree::MaxAncestorLevel-1; 0 <= len; len--){
+        if(b->depth - (1<<len) >= a->depth)
+            b = b->ancestor[len];
+    }
+    for(int len = VarTree::MaxAncestorLevel-1; 0 <= len; len--){
+        if(a->ancestor[len] != b->ancestor[len]){
+            a = a->ancestor[len];
+            b = b->ancestor[len];
+        }
+    }
+    return a;
+};
+}
 
 //=================================================================================================
 // Constructor/Destructor:
@@ -261,9 +297,9 @@ Lit Solver::pickBranchLit()
 |        rest of literals. There may be others from the same level though.
 |  
 |________________________________________________________________________________________________@*/
-StructTree* Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
+VarTree* Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
 {
-    StructTree* rt;
+    VarTree* varRoot = NULL;
     
     int pathC = 0;
     Lit p     = lit_Undef;
@@ -272,13 +308,15 @@ StructTree* Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
     //
     out_learnt.push();      // (leave room for the asserting literal)
     int index   = trail.size() - 1;
+    bool sharable = true;
 
     do{
         assert(confl != CRef_Undef); // (otherwise should be UIP)
         Clause& c = ca[confl];
-
-        rt = LCA(c, rt);
-        
+        sharable &= c.isSharable();
+        if(sharable){
+            varRoot = LCA(c.getVariable(), varRoot);
+        } 
         if (c.learnt())
             claBumpActivity(c);
 
@@ -302,7 +340,7 @@ StructTree* Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
         seen[var(p)] = 0;
         pathC--;
 
-    }while (pathC > 0);
+    }while (pathC > 0); //Here is First UIP
     out_learnt[0] = ~p;
 
     // Simplify conflict clause:
@@ -358,7 +396,7 @@ StructTree* Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel)
 
     for (int j = 0; j < analyze_toclear.size(); j++) seen[var(analyze_toclear[j])] = 0;    // ('seen[]' is now cleared)
 
-    return rt;
+    return sharable ? varRoot : NULL;
 }
 
 
@@ -633,17 +671,27 @@ lbool Solver::search(int nof_conflicts)
             if (decisionLevel() == 0) return l_False;
 
             learnt_clause.clear();
-            analyze(confl, learnt_clause, backtrack_level);
+            VarTree* varRoot = analyze(confl, learnt_clause, backtrack_level);
             cancelUntil(backtrack_level);
 
             if (learnt_clause.size() == 1){
                 uncheckedEnqueue(learnt_clause[0]);
             }else{
                 CRef cr = ca.alloc(learnt_clause, true);
+                ca[cr].setVariable(varRoot);
                 learnts.push(cr);
                 attachClause(cr);
                 claBumpActivity(ca[cr]);
                 uncheckedEnqueue(learnt_clause[0], cr);
+
+                if(varRoot){
+                    vector<CRef> crs = distribute(varRoot, learnt_clause, ca);
+                    for(auto ccr : crs){
+                        learnts.push(ccr);
+                        attachClause(ccr);
+                        claBumpActivity(ca[cr]);
+                    }
+                }
             }
 
             varDecayActivity();
@@ -655,10 +703,11 @@ lbool Solver::search(int nof_conflicts)
                 max_learnts             *= learntsize_inc;
 
                 if (verbosity >= 1)
-                    printf("| %9d | %7d %8d %8d | %8d %8d %6.0f | %6.3f %% |\n", 
+                    printf("| %9d | %7d %8d %8d | %8d %8d %6.0f | %6.3f %% | %d |\n", 
                            (int)conflicts, 
                            (int)dec_vars - (trail_lim.size() == 0 ? trail.size() : trail_lim[0]), nClauses(), (int)clauses_literals, 
-                           (int)max_learnts, nLearnts(), (double)learnts_literals/nLearnts(), progressEstimate()*100);
+                           (int)max_learnts, nLearnts(), (double)learnts_literals/nLearnts(), progressEstimate()*100,
+                           sharedNum);
             }
 
         }else{

@@ -33,17 +33,36 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include <string>
 #include <vector>
 
+using std::vector;
+
 namespace Minisat {
 
-struct StructTree{
-    vector<StructTree*> childs;
-    vector<Lit> vars;
+struct VarTree;
+
+struct Structure{
+    vector<VarTree*> vars;
+
+    void addVar(VarTree* var){
+        vars.push_back(var);
+    }
 };
-vector<int> getVarNum(vec<Lit> clause, StructTree* stc){}
-vector<CRef> distribute(vec<Lit> clause, StructTree* stc){}
-StructTree* mkStruct(){}
-StructTree* mkStruct(string name){}
-StructTree* LCA(StructTree* a, StructTree* b){return NULL;};
+
+struct VarTree{
+    vector<VarTree*> childs;
+    
+    int baseNumber, depth;
+    Structure* stc;
+
+    void setStruct(Structure* _stc){stc = _stc;}
+    void setParent(VarTree* par){ancestor[0] = par;}
+    void addChild(VarTree* var){
+        childs.push_back(var);
+    }
+
+    static const int MaxAncestorLevel = 20;
+    VarTree* ancestor[MaxAncestorLevel] = {};
+};
+
 
 //=================================================================================================
 // Variables, literals, lifted booleans, clauses:
@@ -58,9 +77,6 @@ typedef int Var;
 
 struct Lit {
     int     x;
-
-    StructTree* stc;
-    int     varNum;
     // Use this as a constructor:
     friend Lit mkLit(Var var, bool sign = false);
 
@@ -76,7 +92,7 @@ inline  Lit  operator ^(Lit p, bool b)      { Lit q; q.x = p.x ^ (unsigned int)b
 inline  bool sign      (Lit p)              { return p.x & 1; }
 inline  int  var       (Lit p)              { return p.x >> 1; }
 
-// Mapping Literals to and from compact integers suitable for array indexing:
+// Mapping Literals to and fr￼om compact integers suitable for array indexing:
 inline  int  toInt     (Var v)              { return v; } 
 inline  int  toInt     (Lit p)              { return p.x; } 
 inline  Lit  toLit     (int i)              { Lit p; p.x = i; return p; } 
@@ -136,7 +152,7 @@ class Clause;
 typedef RegionAllocator<uint32_t>::Ref CRef;
 
 class Clause {
-    StructTree* stc;
+    VarTree* vt = NULL;
 
     struct {
         unsigned mark      : 2;
@@ -168,6 +184,16 @@ class Clause {
     }
 
 public:
+    bool isSharable(){
+        return vt!=NULL;// && vt->stc->vars.size() > 1;
+    }
+    void setVariable(VarTree* _vt){
+        vt = _vt;
+    }
+    VarTree* getVariable(){
+        return vt;
+    }
+
     void calcAbstraction() {
         assert(header.has_extra);
         uint32_t abstraction = 0;
@@ -260,6 +286,7 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         // Copy extra data-fields: 
         // (This could be cleaned-up. Generalize Clause-constructor to be applicable here instead?)
         to[cr].mark(c.mark());
+        to[cr].setVariable(c.getVariable());
         if (to[cr].learnt())         to[cr].activity() = c.activity();
         else if (to[cr].has_extra()) to[cr].calcAbstraction();
     }
